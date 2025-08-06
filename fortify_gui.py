@@ -591,7 +591,7 @@ class FortifyGUI:
     
     def sync_main_status(self):
         """同步負責專案狀態"""
-        self.run_fortify_command_for_main("sync-reports", "同步狀態")
+        self.run_fortify_command_for_main("fetch-reports", "同步狀態")
     
     def sync_main_solutions(self):
         """同步負責專案解決方案"""
