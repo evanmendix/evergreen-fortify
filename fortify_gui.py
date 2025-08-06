@@ -805,7 +805,7 @@ class FortifyGUI:
                     pipeline = pipeline_map[repo_name]
                     pipeline_id = pipeline["pipeline_id"]
                     
-                    # 獲取最新建置資訊
+                    # 獲取最新的 build 資訊
                     build_id, result, finish_time = get_latest_build_info(pipeline_id)
                     
                     if build_id:
@@ -818,7 +818,13 @@ class FortifyGUI:
                             ado_config = config.get_azure_devops_config()
                             organization = ado_config["organization"]
                             project = ado_config["project"]
-                            pat = ado_config["personal_access_token"]
+                            pat = os.getenv("AZURE_DEVOPS_PAT", "")
+                            
+                            if not pat:
+                                self.root.after(0, lambda r=repo_name: self.scan_results_tree.insert(
+                                    "", "end", values=(r, "N/A", "N/A", "❌ 無 PAT", "N/A")
+                                ))
+                                continue
                             
                             import base64
                             auth_string = base64.b64encode(f":{pat}".encode()).decode()
@@ -856,12 +862,12 @@ class FortifyGUI:
                             results_count += 1
                             
                         except Exception as e:
-                            self.root.after(0, lambda r=repo_name: self.scan_results_tree.insert(
-                                "", "end", values=(r, "錯誤", "錯誤", f"查詢失敗: {str(e)}", "N/A")
+                            self.root.after(0, lambda r=repo_name: self.scan_results_tree.insert("", "end", 
+                                values=(r, "錯誤", "-", f"查詢失敗: {str(e)}", "N/A")
                             ))
                     else:
-                        self.root.after(0, lambda r=repo_name: self.scan_results_tree.insert(
-                            "", "end", values=(r, "N/A", "N/A", "無建置記錄", "N/A")
+                        self.root.after(0, lambda r=repo_name: self.scan_results_tree.insert("", "end", 
+                            values=(r, "N/A", "N/A", "無建置記錄", "N/A")
                         ))
                 
                 self.root.after(0, lambda: self.scan_status_label.config(text=f"✅ 已更新 {results_count} 個專案的掃描結果"))

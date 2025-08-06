@@ -28,9 +28,25 @@ class ConfigLoader:
         
         self.config_dir = Path(config_dir)
         self.config_file = self.config_dir / "config.yaml"
+        self.project_root = self.config_dir.parent
         
         self._config = None
+        self._load_dotenv()  # 載入 .env 檔案
         self._load_config()
+    
+    def _load_dotenv(self):
+        """載入 .env 檔案"""
+        env_file = self.project_root / ".env"
+        if env_file.exists():
+            try:
+                with open(env_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            os.environ[key.strip()] = value.strip()
+            except Exception as e:
+                print(f"警告：載入 .env 檔案時發生錯誤: {e}")
     
     def _load_config(self):
         """載入設定檔"""
@@ -104,10 +120,12 @@ class ConfigLoader:
     
     def get_azure_devops_config(self) -> Dict[str, str]:
         """取得 Azure DevOps 設定"""
+        # PAT 完全從環境變數讀取
+        pat = os.getenv("AZURE_DEVOPS_PAT", "")
         return {
             "organization": self.get("azure_devops.organization", ""),
             "project": self.get("azure_devops.project", ""),
-            "personal_access_token": self.get("azure_devops.personal_access_token", "")
+            "personal_access_token": pat
         }
     
     def get_pipeline_config(self) -> Dict[str, Any]:
