@@ -325,8 +325,11 @@ class FortifyGUI:
             # 重新載入配置文件（不使用緩存）
             self.config.reload()
             
-            # PAT 欄位同步
-            pat = self.config.get("azure_devops.personal_access_token", "")
+            # PAT 欄位同步 - 從環境變數讀取
+            pat = os.getenv("AZURE_DEVOPS_PAT", "")
+            # 確保不顯示 None，如果是 None 則改為空字串
+            if pat is None:
+                pat = ""
             self.pat_var.set(pat)
             if pat:
                 self.pat_status.config(text="✅ PAT 已設定", foreground="green")
@@ -680,21 +683,41 @@ class FortifyGUI:
                 response = requests.get(url, auth=auth, timeout=10)
                 
                 if response.status_code == 200:
-                    # 測試成功，自動儲存 PAT
+                    # 測試成功，儲存 PAT 到 .env 檔案
                     try:
-                        with open(self.config_file_path, 'r', encoding='utf-8') as f:
-                            config_data = yaml.safe_load(f)
+                        env_file = Path(__file__).parent / ".env"
+                        env_content = ""
                         
-                        if "azure_devops" not in config_data:
-                            config_data["azure_devops"] = {}
-                        config_data["azure_devops"]["personal_access_token"] = pat
+                        # 讀取現有 .env 內容（如果存在）
+                        if env_file.exists():
+                            with open(env_file, 'r', encoding='utf-8') as f:
+                                lines = f.readlines()
+                            
+                            # 更新或新增 PAT 行
+                            pat_updated = False
+                            for i, line in enumerate(lines):
+                                if line.strip().startswith('AZURE_DEVOPS_PAT='):
+                                    lines[i] = f"AZURE_DEVOPS_PAT={pat}\n"
+                                    pat_updated = True
+                                    break
+                            
+                            if not pat_updated:
+                                lines.append(f"AZURE_DEVOPS_PAT={pat}\n")
+                            
+                            env_content = ''.join(lines)
+                        else:
+                            env_content = f"AZURE_DEVOPS_PAT={pat}\n"
                         
-                        with open(self.config_file_path, 'w', encoding='utf-8') as f:
-                            yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+                        # 寫入 .env 檔案
+                        with open(env_file, 'w', encoding='utf-8') as f:
+                            f.write(env_content)
+                        
+                        # 更新環境變數
+                        os.environ["AZURE_DEVOPS_PAT"] = pat
                         
                         self.root.after(0, lambda: self.pat_status.config(
-                            text="✅ PAT 連線測試成功並已儲存", foreground="green"))
-                        self.root.after(0, lambda: self.append_output("✅ PAT 連線測試成功並已自動儲存"))
+                            text="✅ PAT 連線測試成功並已儲存至 .env", foreground="green"))
+                        self.root.after(0, lambda: self.append_output("✅ PAT 連線測試成功並已自動儲存至 .env 檔案"))
                         self.root.after(0, lambda: self.set_feature_lock(False))  # 解鎖功能
                         
                     except Exception as save_error:
