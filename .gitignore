@@ -1,0 +1,34 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# IDE
+.idea
+.vscode
+.windsurfignored
+.cursorignored
+
+# environment variables
+.env
+
+# Ignore contents of specific directories but keep the directories
+產出資料/Fortify報告整理/*
+產出資料/Fortify報告整理/repo拆分報告/*
+!產出資料/Fortify報告整理/.gitkeep
+產出資料/Issue修復共筆/*
+!產出資料/Issue修復共筆/.gitkeep
+產出資料/Fortify報告整理/完整Fortify報告/已修復專案/*.pdf
+產出資料/Fortify報告整理/完整Fortify報告/待修復專案/*.pdf
+
+# Ignore the project cloned from fia azure to fix
+專案資料/*
+!專案資料/.gitkeep
+
+.cache/fortify_download_state.json

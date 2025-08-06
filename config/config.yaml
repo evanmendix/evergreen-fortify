@@ -1,0 +1,150 @@
+azure_devops:
+  organization: chte
+  project: fia
+  personal_access_token: 
+pipeline:
+  branch_priority:
+  - evergreen/fortify
+  - evergreen/main
+  naming_pattern: '{repo_name}-evergreen-fortify'
+repositories:
+  main_repos:
+  - iim
+  - ilc
+  - imc
+  - imj
+  - ina
+  all_repos:
+  - bam
+  - ban
+  - bci
+  - bcm
+  - bdd
+  - bem
+  - bfr
+  - bgm
+  - bia
+  - bim
+  - bli
+  - blm
+  - blo
+  - blq
+  - bms
+  - brc
+  - bri
+  - brm
+  - crm
+  - crs
+  - ctr
+  - dav
+  - egx
+  - eip
+  - etw
+  - fpv
+  - igav
+  - iaf
+  - iba
+  - ibb
+  - ibc
+  - ibe
+  - ibh
+  - ibk
+  - ibr
+  - icm
+  - ida
+  - idu
+  - ifx
+  - igi
+  - ihg
+  - iic
+  - iim
+  - ilc
+  - imc
+  - imj
+  - ina
+  - inc
+  - ini
+  - ioi
+  - ipa
+  - ipc
+  - iqm
+  - irc
+  - irh
+  - isa
+  - ita
+  - itx
+  - iwc
+  - iwi
+  - jem
+  - jfr
+  - jhq
+  - jkm
+  - jmc
+  - jmg
+  - jmq
+  - jps
+  - jut
+  - jvp
+  - kpv
+  - nig
+  - orm
+  - pac
+  - pad
+  - pbs
+  - pea
+  - pgm
+  - plm
+  - poa
+  - pob
+  - pqu
+  - pra
+  - prc
+  - prr
+  - pti
+  - pua
+  - qiz
+  - rim
+  - tac
+  - tmm
+  - waa
+  - wbi
+  - wbs
+  - wbx
+  - wcs
+  - wem
+  - wii
+  - wmm
+  - wrr
+  - wsm
+  - wss
+  - wtg
+  - wuu
+  - wxm
+  - wxr
+  - wxx
+  - xbi
+  - xfs
+  - xum
+  - ybd
+  - ycm
+  - yct
+  - ydd
+  - yim
+  - ymm
+  - yms
+  - ypm
+  - yst
+preferences:
+  default_repos: []
+paths:
+  output_dir: 產出資料
+  reports_dir: 產出資料/Fortify報告整理
+  solutions_dir: 產出資料/Issue修復共筆
+  projects_dir: 專案資料
+solutions:
+  hackmd_urls:
+    Fortify Critical Solution: https://hackmd.io/4wfKm4XfQD2V9YSA9ng5qw
+    Fortify High Solution: https://hackmd.io/Ko6tCMQqTi6z7SlcvGxjTg
+    Fortify Medium Solution: https://hackmd.io/C5ZECnJdQbGwKwUOAMU3tw
+    Fortify Low Solution: https://hackmd.io/tbNWu10NSISEmrZ_Kz6KXg
+    Fortify Others Solution: https://hackmd.io/4AfMfC7FS1ygUixs7FEp-Q
