@@ -66,6 +66,11 @@ class FortifyGUI:
         self.notebook.add(self.config_frame, text="設定管理")
         self.create_config_tab()
         
+        # 分頁 4: 掃描結果
+        self.scan_results_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.scan_results_frame, text="掃描結果")
+        self.create_scan_results_tab()
+        
         # 右側：輸出區域
         right_frame = ttk.Frame(main_container)
         main_container.add(right_frame, weight=1)
@@ -152,7 +157,7 @@ class FortifyGUI:
         
         help_text = """
 🔄 建議執行順序：
-1️⃣ Clone/更新專案 → 取得最新的專案原始碼到本地
+1️⃣ Clone專案至本地  → 取得最新的專案原始碼到本地
 2️⃣ 下載報告 → 從 Fortify 平台下載最新的掃描報告
 3️⃣ 處理 PDF → 將 PDF 報告拆分成個別問題的 Markdown 檔案
 4️⃣ 同步狀態 → 將處理結果同步回 Fortify 平台
@@ -174,10 +179,10 @@ class FortifyGUI:
         button_frame1.pack(fill=tk.X, padx=5, pady=5)
         
         # 為每個按鈕加上詳細說明
-        clone_btn = ttk.Button(button_frame1, text="1. Clone/更新專案", 
+        clone_btn = ttk.Button(button_frame1, text="1. Clone專案至本地 ", 
                               command=self.clone_main_projects)
         clone_btn.pack(side=tk.LEFT, padx=2)
-        self.create_tooltip(clone_btn, "取得負責專案的最新原始碼\n確保 evergreen/fortify 分支存在且最新")
+        self.create_tooltip(clone_btn, "取得負責專案的最新原始碼\n確保，clone分支為evergreen/目錄下方包含fortify名稱的分支")
         
         download_btn = ttk.Button(button_frame1, text="2. 下載報告", 
                                  command=self.download_main_reports)
@@ -307,6 +312,89 @@ class FortifyGUI:
         ttk.Button(config_buttons, text="開啟設定檔", 
                   command=self.open_config_file).pack(side=tk.LEFT, padx=2)
     
+    def create_scan_results_tab(self):
+        """建立掃描結果分頁"""
+        # 控制按鈕區域
+        control_frame = ttk.Frame(self.scan_results_frame)
+        control_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        ttk.Button(control_frame, text="🔄 重新載入掃描結果", 
+                  command=self.load_scan_results).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Button(control_frame, text="🗑️ 清除快取", 
+                  command=self.clear_scan_cache).pack(side=tk.LEFT, padx=2)
+        
+        ttk.Button(control_frame, text="💾 強制重新掃描", 
+                  command=self.force_reload_scan_results).pack(side=tk.LEFT, padx=2)
+        
+        self.scan_results_status = ttk.Label(control_frame, text="")
+        self.scan_results_status.pack(side=tk.RIGHT, padx=5)
+        
+        # 使用 PanedWindow 分割上下區域
+        paned = ttk.PanedWindow(self.scan_results_frame, orient=tk.VERTICAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        # 上方：專案掃描結果總覽
+        top_frame = ttk.LabelFrame(paned, text="專案掃描結果總覽")
+        paned.add(top_frame, weight=1)
+        
+        # 專案結果表格
+        project_columns = ("project", "total_issues", "total_sources", "total_sinks", "branch_name", "scan_time")
+        self.project_results_tree = ttk.Treeview(top_frame, columns=project_columns, show="headings", height=8)
+        
+        # 設定欄位標題
+        self.project_results_tree.heading("project", text="專案名稱")
+        self.project_results_tree.heading("total_issues", text="議題數量")
+        self.project_results_tree.heading("total_sources", text="Source 數量")
+        self.project_results_tree.heading("total_sinks", text="Sink 數量")
+        self.project_results_tree.heading("branch_name", text="掃描分支")
+        self.project_results_tree.heading("scan_time", text="處理時間")
+        
+        # 設定欄位寬度
+        self.project_results_tree.column("project", width=100)
+        self.project_results_tree.column("total_issues", width=80)
+        self.project_results_tree.column("total_sources", width=80)
+        self.project_results_tree.column("total_sinks", width=80)
+        self.project_results_tree.column("branch_name", width=180)
+        self.project_results_tree.column("scan_time", width=130)
+        
+        # 添加滾動條
+        project_scrollbar = ttk.Scrollbar(top_frame, orient=tk.VERTICAL, command=self.project_results_tree.yview)
+        self.project_results_tree.configure(yscrollcommand=project_scrollbar.set)
+        
+        self.project_results_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        project_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 綁定選擇事件
+        self.project_results_tree.bind("<<TreeviewSelect>>", self.on_project_select)
+        
+        # 下方：選中專案的詳細議題
+        bottom_frame = ttk.LabelFrame(paned, text="專案議題詳情")
+        paned.add(bottom_frame, weight=1)
+        
+        # 議題詳情表格
+        issue_columns = ("issue_type", "sources", "sinks", "total")
+        self.issue_details_tree = ttk.Treeview(bottom_frame, columns=issue_columns, show="headings", height=8)
+        
+        # 設定欄位標題
+        self.issue_details_tree.heading("issue_type", text="議題類型")
+        self.issue_details_tree.heading("sources", text="Source 數量")
+        self.issue_details_tree.heading("sinks", text="Sink 數量")
+        self.issue_details_tree.heading("total", text="總計")
+        
+        # 設定欄位寬度
+        self.issue_details_tree.column("issue_type", width=300)
+        self.issue_details_tree.column("sources", width=100)
+        self.issue_details_tree.column("sinks", width=100)
+        self.issue_details_tree.column("total", width=100)
+        
+        # 添加滾動條
+        issue_scrollbar = ttk.Scrollbar(bottom_frame, orient=tk.VERTICAL, command=self.issue_details_tree.yview)
+        self.issue_details_tree.configure(yscrollcommand=issue_scrollbar.set)
+        
+        self.issue_details_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        issue_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    
     def create_output_area(self, parent):
         """建立輸出區域"""
         output_frame = ttk.LabelFrame(parent, text="執行輸出")
@@ -351,8 +439,9 @@ class FortifyGUI:
                 self.main_repos_listbox.insert(tk.END, repo)
                 # 在隱藏的 listbox 中也添加（保持兼容性）
                 self.pipeline_listbox.insert(tk.END, repo)
-                # 在 Treeview 中添加專案行，初始狀態為未掃描
-                self.scan_results_tree.insert("", "end", values=(repo, "尚未掃描", "-", "-", "-"))
+            
+            # 載入 Pipeline 快取資料到 Treeview
+            self._load_pipeline_cache_to_treeview(main_repos)
             
             all_repos = self.config.get_repos("all")
             # 只顯示不在負責專案中的專案
@@ -362,6 +451,11 @@ class FortifyGUI:
                 self.all_repos_listbox.insert(tk.END, repo)
             
             self.append_output(f"✅ 設定重新載入完成 - 負責專案: {len(main_repos)}, 可用專案: {len(available_repos)}")
+            
+            # 自動載入掃描結果（如果有的話）
+            if hasattr(self, 'scan_results_status'):
+                self.load_scan_results()
+            
         except Exception as e:
             messagebox.showerror("錯誤", f"重新載入設定失敗：{e}")
             self.append_output(f"❌ 設定載入失敗: {e}")
@@ -388,8 +482,6 @@ class FortifyGUI:
             self.main_repos_listbox.insert(tk.END, repo)
             # 在隱藏的 listbox 中也添加（保持兼容性）
             self.pipeline_listbox.insert(tk.END, repo)
-            # 在 Treeview 中添加專案行，初始狀態為未掃描
-            self.scan_results_tree.insert("", "end", values=(repo, "尚未掃描", "-", "-", "-"))
             
         # 從所有專案列表中移除已新增的專案
         for i in reversed(selected_indices):
@@ -579,7 +671,7 @@ class FortifyGUI:
     
     def clone_main_projects(self):
         """Clone/更新負責專案"""
-        self.run_fortify_command_for_main("clone", "Clone/更新專案")
+        self.run_fortify_command_for_main("clone", "Clone專案至本地 ")
     
     def download_main_reports(self):
         """下載負責專案報告"""
@@ -837,6 +929,25 @@ class FortifyGUI:
                             build_data = resp.json()
                             branch_name = build_data.get("sourceBranch", "").replace("refs/heads/", "")
                             
+                            # 更新快取中的 Pipeline 資訊
+                            try:
+                                from fortify_tool.utils.cache_manager import get_cache_manager
+                                cache_manager = get_cache_manager()
+                                
+                                pipeline_data = {
+                                    "pipeline_id": pipeline_id,
+                                    "build_id": build_id,
+                                    "result": result,
+                                    "finish_time": finish_time,
+                                    "source_branch": build_data.get("sourceBranch", ""),
+                                    "branch_name": branch_name
+                                }
+                                
+                                cache_manager.update_pipeline_project(repo_name, pipeline_data)
+                                cache_manager.update_project_branch_info(repo_name, branch_name, pipeline_id)
+                            except Exception as cache_error:
+                                print(f"更新快取失敗: {cache_error}")
+                            
                             # 格式化時間
                             if finish_time:
                                 from datetime import datetime
@@ -918,6 +1029,194 @@ class FortifyGUI:
             
         except Exception as e:
             messagebox.showerror("錯誤", f"無法開啟 Build 詳情: {str(e)}")
+    
+    def load_scan_results(self):
+        """載入掃描結果"""
+        self.scan_results_status.config(text="🔄 正在載入掃描結果...")
+        
+        def load_results():
+            try:
+                # 導入掃描結果分析器
+                from fortify_tool.utils.scan_results_analyzer import get_scan_results_analyzer
+                
+                analyzer = get_scan_results_analyzer()
+                results = analyzer.get_project_scan_results()
+                
+                # 在主執行緒中更新 UI
+                self.root.after(0, lambda: self._update_scan_results_display(results))
+                
+            except Exception as e:
+                error_msg = f"載入掃描結果失敗: {e}"
+                self.root.after(0, lambda: self.scan_results_status.config(text=f"❌ {error_msg}"))
+                self.root.after(0, lambda: self.append_output(error_msg))
+        
+        # 在背景執行緒中載入
+        import threading
+        threading.Thread(target=load_results, daemon=True).start()
+    
+    def _update_scan_results_display(self, results):
+        """更新掃描結果顯示"""
+        # 清空現有資料
+        for item in self.project_results_tree.get_children():
+            self.project_results_tree.delete(item)
+        
+        for item in self.issue_details_tree.get_children():
+            self.issue_details_tree.delete(item)
+        
+        if not results:
+            self.scan_results_status.config(text="📋 沒有找到掃描結果")
+            return
+        
+        # 更新專案結果表格
+        for project_name, project_data in results.items():
+            branch_info = project_data.get("branch_info", {})
+            branch_name = branch_info.get("branch_name", "未知")
+            
+            self.project_results_tree.insert("", "end", values=(
+                project_name,
+                project_data["total_issues"],
+                project_data["total_sources"],
+                project_data["total_sinks"],
+                branch_name,
+                project_data["scan_time"] or "未知"
+            ))
+        
+        # 儲存結果資料供詳情顯示使用
+        self.scan_results_data = results
+        
+        self.scan_results_status.config(text=f"✅ 已載入 {len(results)} 個專案的掃描結果")
+        self.append_output(f"📊 掃描結果載入完成，共 {len(results)} 個專案")
+    
+    def on_project_select(self, event):
+        """當選擇專案時顯示詳細議題"""
+        selection = self.project_results_tree.selection()
+        if not selection:
+            return
+        
+        # 清空議題詳情
+        for item in self.issue_details_tree.get_children():
+            self.issue_details_tree.delete(item)
+        
+        # 取得選中的專案
+        item = self.project_results_tree.item(selection[0])
+        project_name = item['values'][0]
+        
+        # 檢查是否有掃描結果資料
+        if not hasattr(self, 'scan_results_data') or project_name not in self.scan_results_data:
+            return
+        
+        # 顯示專案的議題詳情
+        project_data = self.scan_results_data[project_name]
+        issues = project_data["issues"]
+        
+        # 按總數排序議題
+        sorted_issues = sorted(issues.items(), key=lambda x: x[1]["total"], reverse=True)
+        
+        for issue_type, issue_data in sorted_issues:
+            self.issue_details_tree.insert("", "end", values=(
+                issue_type,
+                issue_data["sources"],
+                issue_data["sinks"],
+                issue_data["total"]
+            ))
+
+    def clear_scan_cache(self):
+        """清除掃描結果快取"""
+        try:
+            from fortify_tool.utils.cache_manager import get_cache_manager
+            cache_manager = get_cache_manager()
+            cache_manager.clear_cache("scan_results")
+            
+            self.scan_results_status.config(text="✅ 掃描結果快取已清除")
+            self.append_output("🗑️ 掃描結果快取已清除")
+            
+            # 清空顯示
+            for item in self.project_results_tree.get_children():
+                self.project_results_tree.delete(item)
+            for item in self.issue_details_tree.get_children():
+                self.issue_details_tree.delete(item)
+                
+        except Exception as e:
+            error_msg = f"清除快取失敗: {e}"
+            self.scan_results_status.config(text=f"❌ {error_msg}")
+            self.append_output(error_msg)
+    
+    def force_reload_scan_results(self):
+        """強制重新載入掃描結果（不使用快取）"""
+        self.scan_results_status.config(text="🔄 正在強制重新載入...")
+        
+        def force_load_results():
+            try:
+                from fortify_tool.utils.scan_results_analyzer import get_scan_results_analyzer
+                
+                analyzer = get_scan_results_analyzer()
+                # 強制不使用快取
+                results = analyzer.get_project_scan_results(use_cache=False)
+                
+                self.root.after(0, lambda: self._update_scan_results_display(results))
+                
+            except Exception as e:
+                error_msg = f"強制載入掃描結果失敗: {e}"
+                self.root.after(0, lambda: self.scan_results_status.config(text=f"❌ {error_msg}"))
+                self.root.after(0, lambda: self.append_output(error_msg))
+        
+        import threading
+        threading.Thread(target=force_load_results, daemon=True).start()
+
+    def _load_pipeline_cache_to_treeview(self, main_repos):
+        """載入 Pipeline 快取資料到 Treeview"""
+        try:
+            from fortify_tool.utils.cache_manager import get_cache_manager
+            cache_manager = get_cache_manager()
+            
+            for repo in main_repos:
+                pipeline_data = cache_manager.get_project_pipeline_info(repo)
+                
+                if pipeline_data:
+                    build_id = pipeline_data.get("build_id", "N/A")
+                    result = pipeline_data.get("result", "N/A")
+                    finish_time = pipeline_data.get("finish_time", "N/A")
+                    # 修正分支名稱讀取
+                    branch_name = pipeline_data.get("source_branch", "N/A")
+                    if branch_name and branch_name.startswith("refs/heads/"):
+                        branch_name = branch_name.replace("refs/heads/", "")
+                    
+                    # 格式化時間
+                    if finish_time:
+                        from datetime import datetime
+                        try:
+                            dt = datetime.fromisoformat(finish_time.replace('Z', '+00:00'))
+                            formatted_time = dt.strftime("%Y-%m-%d %H:%M")
+                        except:
+                            formatted_time = finish_time
+                    else:
+                        formatted_time = "N/A"
+                    
+                    # 格式化結果
+                    result_display = {
+                        "succeeded": "✅ 成功",
+                        "partiallySucceeded": "⚠️ 部分成功", 
+                        "failed": "❌ 失敗",
+                        "canceled": "⏹️ 取消"
+                    }.get(result, result or "未知")
+                    
+                    self.scan_results_tree.insert("", "end", values=(
+                        repo,
+                        formatted_time,
+                        branch_name,
+                        result_display,
+                        build_id
+                    ))
+                else:
+                    self.scan_results_tree.insert("", "end", values=(
+                        repo,
+                        "N/A",
+                        "N/A",
+                        "無快取資料",
+                        "N/A"
+                    ))
+        except Exception as e:
+            print(f"載入 Pipeline 快取資料失敗: {e}")
 
 
 def main():

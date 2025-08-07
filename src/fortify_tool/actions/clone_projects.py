@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -182,9 +183,7 @@ def fix_directory_permissions(directory_path):
 
 def clone_or_update_project(repo_name):
     """
-    Clone 或檢查單一專案（簡化版）
-    - 已存在的專案：只檢查是否已 clone，不做更新或分支切換
-    - 首次 clone 時如果沒有 fortify 分支只提醒不切換
+    Clone 或檢查單一專案（自動切換/建立 fortify 分支）
     """
     print(f"\n--- 處理專案: {repo_name} ---")
     
@@ -193,50 +192,34 @@ def clone_or_update_project(repo_name):
     
     if os.path.exists(repo_path):
         print(f"  [INFO] 專案目錄已存在: {repo_path}")
-        
         # 檢查是否為有效的 Git 倉庫
         if not os.path.exists(os.path.join(repo_path, ".git")):
             print(f"  [ERROR] 目錄存在但不是 Git 倉庫，請手動清理: {repo_path}")
             return False
-        
         print(f"  [SUCCESS] 專案已存在且為有效的 Git 倉庫")
-        print(f"  [INFO] 跳過更新和分支切換（依據新的簡化策略）")
+        print(f"  [INFO] 跳過 clone，直接自動切換/建立 fortify 分支 ...")
+        auto_checkout_fortify_branch(repo_path)
         return True
-    
     else:
         print(f"  [INFO] 專案目錄不存在，開始 clone...")
-        
-        # 確保父目錄存在
         os.makedirs(PROJECTS_DIR, exist_ok=True)
-        
-        # 針對已知的大型倉庫使用優化策略
-        large_repos = ['imj']  # 可以在這裡添加其他大型倉庫
-        
+        large_repos = ['imj']
         if repo_name in large_repos:
             print(f"  [INFO] 偵測到大型倉庫，使用優化 clone 策略...")
             success = clone_large_repository(repo_url, repo_path, "evergreen/main")
         else:
-            # 一般 clone 流程
             clone_command = f"git clone {repo_url} {repo_path}"
             success, stdout, stderr = run_git_command(clone_command)
-            
             if not success:
                 print(f"  [WARN] 一般 clone 失敗: {stderr}")
                 print(f"  [INFO] 嘗試使用優化策略...")
                 success = clone_large_repository(repo_url, repo_path, "evergreen/main")
-        
         if not success:
             print(f"  [ERROR] 所有 clone 策略都失敗")
             return False
-        
         print(f"  [SUCCESS] 已成功 clone 專案到: {repo_path}")
-        
-        # 修正新 clone 專案的權限
         fix_directory_permissions(repo_path)
-        
-        # 檢查是否有 fortify 相關分支，但不強制切換
-        check_fortify_branches(repo_path, repo_name)
-        
+        auto_checkout_fortify_branch(repo_path)
         return True
 
 
@@ -306,41 +289,55 @@ def run_git_command_with_timeout(command, cwd=None, timeout=300):
         return False, "", str(e)
 
 
-def check_fortify_branches(repo_path, repo_name):
+def auto_checkout_fortify_branch(repo_path):
     """
-    檢查是否有 fortify 相關分支，但不強制切換
+    自動切換到第一個 evergreen/ 下名稱包含 fortify 的分支，
+    若不存在則從 evergreen/main 建立 evergreen/fortify 並切換。
     """
-    print(f"    -> 檢查專案 '{repo_name}' 是否有 fortify 相關分支...")
-    
-    # 先取得所有遠端分支
-    success, stdout, stderr = run_git_command("git fetch --all", cwd=repo_path)
-    if not success:
-        print(f"    [WARN] 取得遠端分支失敗: {stderr}")
-    
-    # 檢查遠端是否有 fortify 分支
+    # 取得所有遠端分支
     success, stdout, stderr = run_git_command("git ls-remote --heads origin", cwd=repo_path)
-    
-    if success and stdout.strip():
-        branches = stdout.strip().splitlines()
-        fortify_branches = []
-        
-        for branch_line in branches:
-            # 解析分支名稱 (格式: commit_hash refs/heads/branch_name)
-            if "refs/heads/" in branch_line:
-                branch_name = branch_line.split("refs/heads/")[-1]
-                if "evergreen/" in branch_name and "fortify" in branch_name.lower():
-                    fortify_branches.append(branch_name)
-        
-        if fortify_branches:
-            print(f"    [SUCCESS] 發現 {len(fortify_branches)} 個 fortify 相關分支:")
-            for branch in fortify_branches:
-                print(f"      • {branch}")
-            print(f"    [INFO] 專案已準備好進行 Fortify 掃描")
+    if not success or not stdout.strip():
+        print(f"    [WARN] 取得遠端分支資訊失敗: {stderr}")
+        return False
+    branches = stdout.strip().splitlines()
+    target_branch = None
+    for branch_line in branches:
+        if "refs/heads/" in branch_line:
+            branch_name = branch_line.split("refs/heads/")[-1]
+            if branch_name.startswith("evergreen/") and "fortify" in branch_name.lower():
+                target_branch = branch_name
+                break
+    if target_branch:
+        print(f"    [INFO] 自動切換到已存在分支 '{target_branch}' ...")
+        success, _, stderr = run_git_command(f"git checkout -B {target_branch} origin/{target_branch}", cwd=repo_path)
+        if success:
+            print(f"    [SUCCESS] 已切換到分支 '{target_branch}'")
+            return True
         else:
-            print(f"    [WARN] ⚠️  專案 '{repo_name}' 沒有 fortify 相關分支")
-            print(f"    [INFO] 💡 建議手動建立 'evergreen/fortify' 分支後再進行掃描")
+            print(f"    [ERROR] 切換分支失敗: {stderr}")
+            return False
     else:
-        print(f"    [WARN] 無法取得遠端分支資訊: {stderr}")
+        # 沒有符合的分支，自動建立 evergreen/fortify
+        print(f"    [INFO] 未發現 evergreen/ 下含 fortify 的分支，自動建立 'evergreen/fortify' ...")
+        base_branch = "evergreen/main"
+        # 先確保 base_branch 存在
+        success, _, stderr = run_git_command(f"git checkout -B {base_branch} origin/{base_branch}", cwd=repo_path)
+        if not success:
+            print(f"    [ERROR] 切換到基礎分支 '{base_branch}' 失敗: {stderr}")
+            return False
+        # 建立新分支
+        success, _, stderr = run_git_command(f"git checkout -b evergreen/fortify", cwd=repo_path)
+        if not success:
+            print(f"    [ERROR] 建立 'evergreen/fortify' 失敗: {stderr}")
+            return False
+        # 推送到遠端
+        success, _, stderr = run_git_command(f"git push -u origin evergreen/fortify", cwd=repo_path)
+        if success:
+            print(f"    [SUCCESS] 已建立並切換到 'evergreen/fortify' 分支")
+            return True
+        else:
+            print(f"    [WARN] 推送 'evergreen/fortify' 到遠端失敗: {stderr}")
+            return False
 
 
 def clone_all_projects():

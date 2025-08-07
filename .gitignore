@@ -31,4 +31,8 @@ wheels/
 專案資料/*
 !專案資料/.gitkeep
 
-.cache/fortify_download_state.json
+# Ignore Agent Results
+fortify-auto-fix-results.md
+
+# ignore cache
+.cache/*
