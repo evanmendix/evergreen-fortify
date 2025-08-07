@@ -222,6 +222,26 @@ class FortifyGUI:
                                            text="💡 請先確認已設定 PAT 並選擇負責專案，然後開始處理流程",
                                            font=("TkDefaultFont", 9), foreground="blue")
         self.report_status_label.pack(anchor=tk.W, padx=10, pady=5)
+        
+        # 步驟進度顯示區域
+        progress_frame = ttk.Frame(status_frame)
+        progress_frame.pack(fill=tk.X, padx=10, pady=(0, 5))
+        
+        # 初始化步驟狀態
+        self.workflow_steps = {
+            "clone": {"name": "1. Clone專案", "status": "pending", "label": None},
+            "download": {"name": "2. 下載報告", "status": "pending", "label": None},
+            "process": {"name": "3. 處理PDF", "status": "pending", "label": None},
+            "sync_status": {"name": "4. 同步狀態", "status": "pending", "label": None},
+            "sync_solution": {"name": "5. 同步解決方案", "status": "pending", "label": None}
+        }
+        
+        # 創建步驟狀態標籤
+        for step_key, step_info in self.workflow_steps.items():
+            step_label = ttk.Label(progress_frame, text=f"{step_info['name']}: ⏳ 待執行", 
+                                 font=("TkDefaultFont", 8), foreground="gray")
+            step_label.pack(anchor=tk.W, padx=5, pady=1)
+            step_info["label"] = step_label
     
     def create_config_tab(self):
         """建立設定管理分頁"""
@@ -414,10 +434,8 @@ class FortifyGUI:
             self.config.reload()
             
             # PAT 欄位同步 - 從環境變數讀取
+            import os
             pat = os.getenv("AZURE_DEVOPS_PAT", "")
-            # 確保不顯示 None，如果是 None 則改為空字串
-            if pat is None:
-                pat = ""
             self.pat_var.set(pat)
             if pat:
                 self.pat_status.config(text="✅ PAT 已設定", foreground="green")
@@ -425,6 +443,7 @@ class FortifyGUI:
                 self.pat_status.config(text="❌ 尚未設定 PAT", foreground="red")
             # 控制功能鎖定
             self.set_feature_lock(not bool(pat))
+            
             # 清空並重新載入專案列表
             self.main_repos_listbox.delete(0, tk.END)
             self.all_repos_listbox.delete(0, tk.END)
@@ -434,28 +453,25 @@ class FortifyGUI:
             # 清空隱藏的 pipeline_listbox（保持兼容性）
             self.pipeline_listbox.delete(0, tk.END)
             
+            # 從 cache 載入 main_repos
             main_repos = self.config.get_repos("main")
             for repo in main_repos:
                 self.main_repos_listbox.insert(tk.END, repo)
                 # 在隱藏的 listbox 中也添加（保持兼容性）
                 self.pipeline_listbox.insert(tk.END, repo)
+                # 在 Treeview 中添加專案行，初始狀態為未掃描
+                self.scan_results_tree.insert("", "end", values=(repo, "尚未掃描", "-", "-", "-"))
             
-            # 載入 Pipeline 快取資料到 Treeview
-            self._load_pipeline_cache_to_treeview(main_repos)
-            
+            # 從 config.yaml 載入 all_repos
             all_repos = self.config.get_repos("all")
-            # 只顯示不在負責專案中的專案
-            main_repos_set = set(main_repos)
-            available_repos = [repo for repo in all_repos if repo not in main_repos_set]
-            for repo in available_repos:
+            for repo in all_repos:
                 self.all_repos_listbox.insert(tk.END, repo)
             
-            self.append_output(f"✅ 設定重新載入完成 - 負責專案: {len(main_repos)}, 可用專案: {len(available_repos)}")
+            self.append_output(f"✅ 設定重新載入完成 - 負責專案: {len(main_repos)}, 所有專案: {len(all_repos)}")
             
-            # 自動載入掃描結果（如果有的話）
-            if hasattr(self, 'scan_results_status'):
-                self.load_scan_results()
-            
+            # 重置工作流程狀態
+            if hasattr(self, 'workflow_steps'):
+                self.reset_workflow_status()
         except Exception as e:
             messagebox.showerror("錯誤", f"重新載入設定失敗：{e}")
             self.append_output(f"❌ 設定載入失敗: {e}")
@@ -468,6 +484,7 @@ class FortifyGUI:
             return
             
         selected_repos = [self.all_repos_listbox.get(i) for i in selected_indices]
+        
         current_main_repos = list(self.main_repos_listbox.get(0, tk.END))
         
         # 過濾已存在的專案
@@ -533,23 +550,17 @@ class FortifyGUI:
         self.add_repos_to_main()  # 使用相同邏輯
     
     def save_config(self):
-        """儲存專案設定到 config.yaml（不處理 PAT）"""
+        """儲存專案設定到 cache（不處理 PAT 和 config.yaml）"""
         try:
-            with open(self.config_file_path, 'r', encoding='utf-8') as f:
-                config_data = yaml.safe_load(f)
-            
-            # 只更新 main_repos，不處理 PAT
+            # 只儲存 main_repos 到 cache
             current_main_repos = list(self.main_repos_listbox.get(0, tk.END))
-            config_data['repositories']['main_repos'] = current_main_repos
-            
-            with open(self.config_file_path, 'w', encoding='utf-8') as f:
-                yaml.dump(config_data, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+            self.config.save_main_repos(current_main_repos)
             
             # 重新載入設定並同步所有 GUI 元件
             self.refresh_config()
             
             messagebox.showinfo("成功", f"專案設定已儲存！\n負責專案: {len(current_main_repos)} 個")
-            self.append_output(f"✅ 專案設定已儲存 - 負責專案: {', '.join(current_main_repos)}")
+            self.append_output(f"✅ 專案設定已儲存到 cache - 負責專案: {', '.join(current_main_repos)}")
             
         except Exception as e:
             messagebox.showerror("錯誤", f"儲存專案設定失敗：{e}")
@@ -630,7 +641,7 @@ class FortifyGUI:
         
         threading.Thread(target=run_trigger, daemon=True).start()
     
-    def run_fortify_command_for_main(self, command, description):
+    def run_fortify_command_for_main(self, command, description, step_key):
         """針對負責專案執行 Fortify 命令"""
         main_repos = self.config.get_repos("main")
         
@@ -660,38 +671,71 @@ class FortifyGUI:
                 
                 if process.returncode == 0:
                     self.root.after(0, lambda: self.append_output(f"✅ {description} 執行完成"))
+                    self.root.after(0, lambda: self.update_workflow_step_status(step_key, "success"))
+                    if step_key == "full_workflow":
+                        # 完整工作流程成功時，標記所有步驟為完成
+                        self.root.after(0, lambda: self.mark_all_steps_complete())
+                        self.root.after(0, lambda: self.update_report_status("完整工作流程執行完成！", "success"))
+                    else:
+                        self.root.after(0, lambda: self.update_report_status(f"{description} 執行完成", "success"))
                 else:
                     self.root.after(0, lambda: self.append_output(f"❌ {description} 執行失敗"))
+                    self.root.after(0, lambda: self.update_workflow_step_status(step_key, "failed"))
+                    if step_key == "full_workflow":
+                        # 完整工作流程失敗時，標記所有步驟為失敗
+                        self.root.after(0, lambda: self.mark_all_steps_failed())
+                        self.root.after(0, lambda: self.update_report_status("完整工作流程執行失敗", "error"))
+                    else:
+                        self.root.after(0, lambda: self.update_report_status(f"{description} 執行失敗", "error"))
                     
             except Exception as e:
                 error_msg = f"❌ 執行 {description} 時發生錯誤: {e}"
                 self.root.after(0, lambda: self.append_output(error_msg))
+                self.root.after(0, lambda: self.update_workflow_step_status(step_key, "failed"))
+                self.root.after(0, lambda: self.update_report_status(f"{description} 發生錯誤", "error"))
         
         threading.Thread(target=run_command, daemon=True).start()
     
     def clone_main_projects(self):
         """Clone/更新負責專案"""
-        self.run_fortify_command_for_main("clone", "Clone專案至本地 ")
-    
+        self.update_workflow_step_status("clone", "running")
+        self.update_report_status("正在 Clone 負責專案...", "info")
+        self.run_fortify_command_for_main("clone", "Clone專案至本地 ", "clone")
+
     def download_main_reports(self):
         """下載負責專案報告"""
-        self.run_fortify_command_for_main("fetch-reports", "下載報告")
-    
+        self.update_workflow_step_status("download", "running")
+        self.update_report_status("正在下載 Fortify 報告...", "info")
+        self.run_fortify_command_for_main("fetch", "下載報告", "download")
+
     def process_main_pdfs(self):
         """處理負責專案 PDF"""
-        self.run_fortify_command_for_main("process-pdfs", "處理 PDF")
-    
+        self.update_workflow_step_status("process", "running")
+        self.update_report_status("正在處理 PDF 報告...", "info")
+        self.run_fortify_command_for_main("process", "處理 PDF", "process")
+
     def sync_main_status(self):
         """同步負責專案狀態"""
-        self.run_fortify_command_for_main("fetch-reports", "同步狀態")
-    
+        self.update_workflow_step_status("sync_status", "running")
+        self.update_report_status("正在同步狀態到 Fortify 平台...", "info")
+        self.run_fortify_command_for_main("sync", "同步狀態", "sync_status")
+
     def sync_main_solutions(self):
         """同步負責專案解決方案"""
-        self.run_fortify_command_for_main("sync-solutions", "同步解決方案，目前僅可以自動更新來自VJ HackMD的版本，Google Docs版本請手動下載")
-    
+        self.update_workflow_step_status("sync_solution", "running")
+        self.update_report_status("正在同步解決方案...", "info")
+        self.run_fortify_command_for_main("solutions", "同步解決方案", "sync_solution")
+
     def run_main_full_workflow(self):
         """執行負責專案完整工作流程"""
-        self.run_fortify_command_for_main("all", "完整工作流程")
+        self.reset_workflow_status()
+        self.update_report_status("開始執行完整工作流程...", "info")
+        
+        # 標記所有步驟為執行中（因為 all 命令會依序執行所有步驟）
+        for step_key in ["clone", "download", "process", "sync_status", "sync_solution"]:
+            self.update_workflow_step_status(step_key, "running")
+            
+        self.run_fortify_command_for_main("all", "完整工作流程", "full_workflow")
     
     def append_output(self, text):
         """附加輸出到文字區域"""
@@ -754,76 +798,49 @@ class FortifyGUI:
         """測試 PAT 連線"""
         pat = self.pat_var.get().strip()
         if not pat:
-            messagebox.showwarning("警告", "請先輸入 PAT")
+            self.pat_status.config(text="❌ 請輸入 PAT", foreground="red")
             return
         
-        self.append_output("🔍 正在測試 PAT 連線...")
+        self.pat_status.config(text="🔄 測試連線中...", foreground="blue")
         
         def test_connection():
             try:
                 import requests
                 from requests.auth import HTTPBasicAuth
-                import base64
                 
                 # 測試 Azure DevOps API 連線
                 organization = self.config.get("azure_devops.organization", "chte")
                 project = self.config.get("azure_devops.project", "fia")
                 
+                # 使用 Build Definitions API 來測試，這需要 Build (read) 權限
                 url = f"https://dev.azure.com/{organization}/{project}/_apis/build/definitions?api-version=6.0&$top=1"
                 auth = HTTPBasicAuth('', pat)
                 
                 response = requests.get(url, auth=auth, timeout=10)
                 
                 if response.status_code == 200:
-                    # 測試成功，儲存 PAT 到 .env 檔案
-                    try:
-                        env_file = Path(__file__).parent / ".env"
-                        env_content = ""
-                        
-                        # 讀取現有 .env 內容（如果存在）
-                        if env_file.exists():
-                            with open(env_file, 'r', encoding='utf-8') as f:
-                                lines = f.readlines()
-                            
-                            # 更新或新增 PAT 行
-                            pat_updated = False
-                            for i, line in enumerate(lines):
-                                if line.strip().startswith('AZURE_DEVOPS_PAT='):
-                                    lines[i] = f"AZURE_DEVOPS_PAT={pat}\n"
-                                    pat_updated = True
-                                    break
-                            
-                            if not pat_updated:
-                                lines.append(f"AZURE_DEVOPS_PAT={pat}\n")
-                            
-                            env_content = ''.join(lines)
-                        else:
-                            env_content = f"AZURE_DEVOPS_PAT={pat}\n"
-                        
-                        # 寫入 .env 檔案
-                        with open(env_file, 'w', encoding='utf-8') as f:
-                            f.write(env_content)
-                        
-                        # 更新環境變數
-                        os.environ["AZURE_DEVOPS_PAT"] = pat
-                        
-                        self.root.after(0, lambda: self.pat_status.config(
-                            text="✅ PAT 連線測試成功並已儲存至 .env", foreground="green"))
-                        self.root.after(0, lambda: self.append_output("✅ PAT 連線測試成功並已自動儲存至 .env 檔案"))
-                        self.root.after(0, lambda: self.set_feature_lock(False))  # 解鎖功能
-                        
-                    except Exception as save_error:
-                        self.root.after(0, lambda: self.append_output(f"❌ PAT 儲存失敗: {save_error}"))
-                else:
-                    error_msg = f"❌ PAT 連線失敗 (HTTP {response.status_code})"
+                    # 測試成功，儲存到 .env 文件
+                    self.save_pat_to_env(pat)
                     self.root.after(0, lambda: self.pat_status.config(
-                        text=error_msg, foreground="red"))
-                    self.root.after(0, lambda: self.append_output(error_msg))
+                        text="✅ PAT 測試成功並已儲存", foreground="green"))
+                    self.root.after(0, lambda: self.set_feature_lock(False))
+                    self.root.after(0, lambda: self.append_output("✅ PAT 測試成功，功能已解鎖"))
+                elif response.status_code == 401:
+                    self.root.after(0, lambda: self.pat_status.config(
+                        text="❌ PAT 無效或已過期", foreground="red"))
+                    self.root.after(0, lambda: self.append_output("❌ PAT 無效或已過期，請檢查 PAT 是否正確"))
+                elif response.status_code == 403:
+                    self.root.after(0, lambda: self.pat_status.config(
+                        text="❌ PAT 權限不足", foreground="red"))
+                    self.root.after(0, lambda: self.append_output("❌ PAT 權限不足，請確保 PAT 具有 Build (read and execute) 權限"))
+                else:
+                    error_msg = f"❌ 連線失敗 (HTTP {response.status_code})"
+                    self.root.after(0, lambda: self.pat_status.config(text=error_msg, foreground="red"))
+                    self.root.after(0, lambda: self.append_output(f"{error_msg}: {response.text[:100]}"))
                     
             except Exception as e:
-                error_msg = f"❌ PAT 連線測試失敗: {e}"
-                self.root.after(0, lambda: self.pat_status.config(
-                    text=error_msg, foreground="red"))
+                error_msg = f"❌ 連線測試失敗: {str(e)}"
+                self.root.after(0, lambda: self.pat_status.config(text=error_msg, foreground="red"))
                 self.root.after(0, lambda: self.append_output(error_msg))
         
         threading.Thread(target=test_connection, daemon=True).start()
@@ -1217,6 +1234,174 @@ class FortifyGUI:
                     ))
         except Exception as e:
             print(f"載入 Pipeline 快取資料失敗: {e}")
+
+    def update_workflow_step_status(self, step_key, status, message=None):
+        """更新工作流程步驟狀態
+        
+        Args:
+            step_key: 步驟鍵值 (clone, download, process, sync_status, sync_solution)
+            status: 狀態 (pending, running, success, failed)
+            message: 可選的額外訊息
+        """
+        if step_key not in self.workflow_steps:
+            return
+            
+        step_info = self.workflow_steps[step_key]
+        step_info["status"] = status
+        
+        # 狀態圖示和顏色映射
+        status_config = {
+            "pending": {"icon": "⏳", "text": "待執行", "color": "gray"},
+            "running": {"icon": "🔄", "text": "執行中", "color": "blue"},
+            "success": {"icon": "✅", "text": "完成", "color": "green"},
+            "failed": {"icon": "❌", "text": "失敗", "color": "red"}
+        }
+        
+        config = status_config.get(status, status_config["pending"])
+        display_text = f"{step_info['name']}: {config['icon']} {config['text']}"
+        
+        if message:
+            display_text += f" - {message}"
+            
+        # 更新標籤
+        if step_info["label"]:
+            step_info["label"].config(text=display_text, foreground=config["color"])
+
+    def update_report_status(self, message, status_type="info"):
+        """更新主要狀態訊息
+        
+        Args:
+            message: 狀態訊息
+            status_type: 訊息類型 (info, success, warning, error)
+        """
+        color_map = {
+            "info": "blue",
+            "success": "green", 
+            "warning": "orange",
+            "error": "red"
+        }
+        
+        icon_map = {
+            "info": "💡",
+            "success": "✅",
+            "warning": "⚠️", 
+            "error": "❌"
+        }
+        
+        color = color_map.get(status_type, "blue")
+        icon = icon_map.get(status_type, "💡")
+        
+        self.report_status_label.config(text=f"{icon} {message}", foreground=color)
+
+    def reset_workflow_status(self):
+        """重置所有工作流程步驟狀態"""
+        for step_key in self.workflow_steps:
+            self.update_workflow_step_status(step_key, "pending")
+        self.update_report_status("請選擇要執行的處理步驟", "info")
+
+    def mark_all_steps_complete(self):
+        """標記所有步驟為完成狀態"""
+        for step_key in self.workflow_steps:
+            self.update_workflow_step_status(step_key, "success")
+
+    def mark_all_steps_failed(self):
+        """標記所有步驟為失敗狀態"""
+        for step_key in self.workflow_steps:
+            self.update_workflow_step_status(step_key, "failed")
+
+    def test_pat_connection(self):
+        """測試 PAT 連線"""
+        pat = self.pat_var.get().strip()
+        if not pat:
+            self.pat_status.config(text="❌ 請輸入 PAT", foreground="red")
+            return
+        
+        self.pat_status.config(text="🔄 測試連線中...", foreground="blue")
+        
+        def test_connection():
+            try:
+                import requests
+                from requests.auth import HTTPBasicAuth
+                
+                # 測試 Azure DevOps API 連線
+                organization = self.config.get("azure_devops.organization", "chte")
+                project = self.config.get("azure_devops.project", "fia")
+                
+                # 使用 Build Definitions API 來測試，這需要 Build (read) 權限
+                url = f"https://dev.azure.com/{organization}/{project}/_apis/build/definitions?api-version=6.0&$top=1"
+                auth = HTTPBasicAuth('', pat)
+                
+                response = requests.get(url, auth=auth, timeout=10)
+                
+                if response.status_code == 200:
+                    # 測試成功，儲存到 .env 文件
+                    self.save_pat_to_env(pat)
+                    self.root.after(0, lambda: self.pat_status.config(
+                        text="✅ PAT 測試成功並已儲存", foreground="green"))
+                    self.root.after(0, lambda: self.set_feature_lock(False))
+                    self.root.after(0, lambda: self.append_output("✅ PAT 測試成功，功能已解鎖"))
+                elif response.status_code == 401:
+                    self.root.after(0, lambda: self.pat_status.config(
+                        text="❌ PAT 無效或已過期", foreground="red"))
+                    self.root.after(0, lambda: self.append_output("❌ PAT 無效或已過期，請檢查 PAT 是否正確"))
+                elif response.status_code == 403:
+                    self.root.after(0, lambda: self.pat_status.config(
+                        text="❌ PAT 權限不足", foreground="red"))
+                    self.root.after(0, lambda: self.append_output("❌ PAT 權限不足，請確保 PAT 具有 Build (read and execute) 權限"))
+                else:
+                    error_msg = f"❌ 連線失敗 (HTTP {response.status_code})"
+                    self.root.after(0, lambda: self.pat_status.config(text=error_msg, foreground="red"))
+                    self.root.after(0, lambda: self.append_output(f"{error_msg}: {response.text[:100]}"))
+                    
+            except Exception as e:
+                error_msg = f"❌ 連線測試失敗: {str(e)}"
+                self.root.after(0, lambda: self.pat_status.config(text=error_msg, foreground="red"))
+                self.root.after(0, lambda: self.append_output(error_msg))
+        
+        threading.Thread(target=test_connection, daemon=True).start()
+    
+    def on_pat_changed(self, *args):
+        """PAT 輸入變更時的處理"""
+        pat = self.pat_var.get().strip()
+        if pat:
+            self.pat_status.config(text="💡 請點擊「測試連線」來驗證 PAT", foreground="blue")
+        else:
+            self.pat_status.config(text="❌ 尚未設定 PAT", foreground="red")
+            self.set_feature_lock(True)
+    
+    def save_pat_to_env(self, pat):
+        """儲存 PAT 到 .env 文件"""
+        try:
+            env_file = Path(__file__).parent / ".env"
+            
+            # 讀取現有的 .env 內容
+            env_lines = []
+            if env_file.exists():
+                with open(env_file, 'r', encoding='utf-8') as f:
+                    env_lines = f.readlines()
+            
+            # 更新或添加 AZURE_DEVOPS_PAT
+            pat_found = False
+            for i, line in enumerate(env_lines):
+                if line.strip().startswith('AZURE_DEVOPS_PAT='):
+                    env_lines[i] = f'AZURE_DEVOPS_PAT={pat}\n'
+                    pat_found = True
+                    break
+            
+            if not pat_found:
+                env_lines.append(f'AZURE_DEVOPS_PAT={pat}\n')
+            
+            # 寫回 .env 文件
+            with open(env_file, 'w', encoding='utf-8') as f:
+                f.writelines(env_lines)
+            
+            # 更新環境變數
+            import os
+            os.environ['AZURE_DEVOPS_PAT'] = pat
+            
+        except Exception as e:
+            print(f"警告：儲存 PAT 到 .env 時發生錯誤: {e}")
+            raise
 
 
 def main():

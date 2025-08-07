@@ -1,19 +1,12 @@
 azure_devops:
   organization: chte
   project: fia
-  personal_access_token: 
 pipeline:
   branch_priority:
   - evergreen/fortify
   - evergreen/main
   naming_pattern: '{repo_name}-evergreen-fortify'
 repositories:
-  main_repos:
-  - iim
-  - ilc
-  - imc
-  - imj
-  - ina
   all_repos:
   - bam
   - ban
@@ -134,8 +127,6 @@ repositories:
   - yms
   - ypm
   - yst
-preferences:
-  default_repos: []
 paths:
   output_dir: 產出資料
   reports_dir: 產出資料/Fortify報告整理

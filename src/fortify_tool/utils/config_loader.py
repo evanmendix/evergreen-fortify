@@ -8,6 +8,7 @@ YAML 設定檔載入工具
 
 import os
 import yaml
+import json
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 
@@ -28,7 +29,11 @@ class ConfigLoader:
         
         self.config_dir = Path(config_dir)
         self.config_file = self.config_dir / "config.yaml"
-        self.project_root = self.config_dir.parent
+        self.cache_dir = self.config_dir.parent / ".cache"
+        self.main_repos_cache_file = self.cache_dir / "main_repos.json"
+        
+        # 確保 cache 目錄存在
+        self.cache_dir.mkdir(exist_ok=True)
         
         self._config = None
         self._load_dotenv()  # 載入 .env 檔案
@@ -36,7 +41,7 @@ class ConfigLoader:
     
     def _load_dotenv(self):
         """載入 .env 檔案"""
-        env_file = self.project_root / ".env"
+        env_file = self.config_dir.parent / ".env"
         if env_file.exists():
             try:
                 with open(env_file, 'r', encoding='utf-8') as f:
@@ -71,13 +76,30 @@ class ConfigLoader:
     
     def _apply_env_overrides(self):
         """套用環境變數覆蓋"""
+        # 先載入 .env 文件
+        self._load_env_file()
+        
         # Azure DevOps PAT
         pat = os.getenv("AZURE_DEVOPS_PAT")
         if pat:
             if "azure_devops" not in self._config:
                 self._config["azure_devops"] = {}
             self._config["azure_devops"]["personal_access_token"] = pat
-        
+    
+    def _load_env_file(self):
+        """載入 .env 文件"""
+        env_file = self.config_dir.parent / ".env"
+        if env_file.exists():
+            try:
+                with open(env_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            os.environ[key.strip()] = value.strip()
+            except Exception as e:
+                print(f"警告：載入 .env 檔案時發生錯誤: {e}")
+    
     def get(self, key_path: str, default: Any = None) -> Any:
         """
         取得設定值，支援點記法路徑
@@ -116,7 +138,8 @@ class ConfigLoader:
             user_repos = self.get("preferences.default_repos", [])
             if user_repos:
                 return user_repos
-            return self.get("repositories.main_repos", [])
+            # 使用 cache
+            return self.get_main_repos_from_cache()
     
     def get_azure_devops_config(self) -> Dict[str, str]:
         """取得 Azure DevOps 設定"""
@@ -151,6 +174,39 @@ class ConfigLoader:
     def reload(self):
         """重新載入設定檔"""
         self._load_config()
+    
+    def save_main_repos(self, repos: List[str]):
+        """
+        儲存負責專案清單到 cache
+        
+        Args:
+            repos: 專案名稱清單
+        """
+        try:
+            with open(self.main_repos_cache_file, 'w', encoding='utf-8') as f:
+                json.dump(repos, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"警告：儲存 main_repos cache 時發生錯誤: {e}")
+    
+    def get_main_repos_from_cache(self) -> List[str]:
+        """
+        從 cache 讀取負責專案清單
+        
+        Returns:
+            專案名稱清單
+        """
+        try:
+            if self.main_repos_cache_file.exists():
+                with open(self.main_repos_cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"警告：讀取 main_repos cache 時發生錯誤: {e}")
+        
+        # 如果 cache 不存在或讀取失敗，從 config.yaml 初始化
+        main_repos = self.get("repositories.main_repos", [])
+        if main_repos:
+            self.save_main_repos(main_repos)
+        return main_repos
 
 
 # 全域設定載入器實例
